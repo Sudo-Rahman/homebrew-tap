@@ -1,0 +1,92 @@
+name: Bump Ultra Explorer cask
+
+# Polls the public release repository so no cross-repository secret is needed.
+# `releases/latest` never returns drafts, so an incomplete release is never offered.
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: bump-ultra-explorer
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    env:
+      CASK: Casks/ultra-explorer.rb
+      RELEASES_REPO: Sudo-Rahman/UltraExplorer-Releases
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve the latest public release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG=$(gh release view --repo "$RELEASES_REPO" --json tagName -q .tagName)
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Unexpected release tag: $TAG" >&2
+            exit 1
+          fi
+          VERSION=${TAG#v}
+          CURRENT=$(sed -n 's/^  version "\(.*\)"$/\1/p' "$CASK")
+          echo "Latest release: $VERSION, cask: $CURRENT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if [[ "$VERSION" == "$CURRENT" ]]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Update version and checksum
+        if: steps.release.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          DMG="UltraExplorer_${VERSION}_macOS_arm64.dmg"
+          WORK=$(mktemp -d)
+          gh release download "$TAG" --repo "$RELEASES_REPO" -p SHA256SUMS -D "$WORK"
+          SHA=$(awk -v f="$DMG" '{ name = $2; sub(/^\*/, "", name); sub(/^\.\//, "", name) } name == f { print $1 }' "$WORK/SHA256SUMS")
+          if [[ ! "$SHA" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "No valid checksum for $DMG in SHA256SUMS" >&2
+            exit 1
+          fi
+          # Verify the published DMG itself rather than trusting the checksum file alone.
+          gh release download "$TAG" --repo "$RELEASES_REPO" -p "$DMG" -D "$WORK"
+          echo "$SHA  $WORK/$DMG" | shasum -a 256 -c -
+          sed -i '' -e "s/^  version \".*\"$/  version \"$VERSION\"/" \
+                    -e "s/^  sha256 \".*\"$/  sha256 \"$SHA\"/" "$CASK"
+          git diff
+
+      - name: Audit the cask
+        if: steps.release.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          TAP_DIR="$(brew --repository)/Library/Taps/sudo-rahman/homebrew-tap"
+          mkdir -p "$(dirname "$TAP_DIR")"
+          rm -rf "$TAP_DIR"
+          ln -s "$GITHUB_WORKSPACE" "$TAP_DIR"
+          brew style --cask "$CASK"
+          brew audit --cask --online --strict sudo-rahman/tap/ultra-explorer
+
+      - name: Commit and push
+        if: steps.release.outputs.changed == 'true'
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "ultra-explorer ${VERSION}"
+          git push
