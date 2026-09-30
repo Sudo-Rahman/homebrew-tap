@@ -73,11 +73,11 @@ jobs:
         if: steps.release.outputs.changed == 'true'
         run: |
           set -euo pipefail
-          TAP_DIR="$(brew --repository)/Library/Taps/sudo-rahman/homebrew-tap"
-          mkdir -p "$(dirname "$TAP_DIR")"
-          rm -rf "$TAP_DIR"
-          ln -s "$GITHUB_WORKSPACE" "$TAP_DIR"
-          brew style --cask "$CASK"
+          # Homebrew only audits casks inside a tap: tap this repository and
+          # copy the updated cask into it before auditing by name.
+          brew tap sudo-rahman/tap
+          cp "$CASK" "$(brew --repository sudo-rahman/tap)/$CASK"
+          brew style --cask sudo-rahman/tap/ultra-explorer
           brew audit --cask --online --strict sudo-rahman/tap/ultra-explorer
 
       - name: Commit and push
