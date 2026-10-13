@@ -1,6 +1,6 @@
 cask "ultra-explorer" do
-  version "1.0.5"
-  sha256 "1884c343f988e675694670de63a12442ac3a1e1b9ce8f80e061c44159f330a33"
+  version "1.1.0"
+  sha256 "bc78b124675513a820af43d226727c411226de93649f003c036803b88537f88b"
 
   url "https://github.com/Sudo-Rahman/UltraExplorer-Releases/releases/download/v#{version}/UltraExplorer_#{version}_macOS_arm64.dmg"
   name "Ultra Explorer"
